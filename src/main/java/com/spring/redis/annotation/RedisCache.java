@@ -17,8 +17,8 @@ public @interface RedisCache {
 
     RedisOptType method() default RedisOptType.GET;
 
-    long expireTime() default 0L;
+    long expireTime() default 5L;
 
-    TimeUnit timeUnit() default TimeUnit.HOURS;
+    TimeUnit timeUnit() default TimeUnit.MINUTES;
 
 }

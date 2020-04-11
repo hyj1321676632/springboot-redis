@@ -1,6 +1,5 @@
 package com.spring.redis.config.aop;
 
-import com.alibaba.fastjson.JSON;
 import com.spring.redis.annotation.RedisCache;
 import com.spring.redis.enums.RedisOptType;
 import lombok.extern.slf4j.Slf4j;
@@ -48,45 +47,46 @@ public class RedisCacheAspect {
         RedisOptType redisMethod = redisCache.method();
         long expireTime = redisCache.expireTime();
         TimeUnit timeUnit = redisCache.timeUnit();
-        // 获取调用方法的返回类型
-        Method method = ((MethodSignature) joinPoint.getSignature()).getMethod();
-        Class returnType = method.getReturnType();
         // 不为空说明是自定义的key
         if (StringUtils.isEmpty(key)) {
             if (!(joinPoint.getSignature() instanceof MethodSignature)) {
                 throw new IllegalArgumentException("该注解只适用于方法");
             }
+            // 获取调用方法的返回类型
+            Method method = ((MethodSignature) joinPoint.getSignature()).getMethod();
             key = keyGenerator.generate(joinPoint.getTarget(), method, joinPoint.getArgs()).toString();
         }
-        Object object = null;
+        Object value = null;
         if (RedisOptType.GET.equals(redisMethod)) {
-            if (redisTemplate.hasKey(key)) {
-                switch (redisTemplate.type(key)) {
-                    case STRING:
-                        object = redisTemplate.opsForValue().get(key);
-                        if (object != null && !(object instanceof String))
-                            return JSON.parseObject(object.toString(), returnType);
-                        return object;
-                    case HASH:
-                        return redisTemplate.opsForHash().entries(key);
-                    case LIST:
-                        return redisTemplate.opsForList().range(key, 0, -1);
-                    case SET:
-                        return redisTemplate.opsForSet().members(key);
-                    case ZSET:
-                        return redisTemplate.opsForZSet().range(key, 0, -1);
-                }
+            switch (redisTemplate.type(key)) {
+                case STRING:
+                    return redisTemplate.opsForValue().get(key);
+                case HASH:
+                    return redisTemplate.opsForHash().entries(key);
+                case LIST:
+                    return redisTemplate.opsForList().range(key, 0, -1);
+                case SET:
+                    return redisTemplate.opsForSet().members(key);
+                case ZSET:
+                    return redisTemplate.opsForZSet().range(key, 0, -1);
+                case NONE:
+                    // 不存在则从数据库中取并存入缓存
+                    value = joinPoint.proceed();
+                    if (expireTime > 0)
+                        redisTemplate.opsForValue().set(key, value, expireTime, timeUnit);
+                    else
+                        redisTemplate.opsForValue().set(key, value);
             }
-            // 不存在则从数据库中取并存入缓存
-            object = joinPoint.proceed();
-            this.saveRedisCache(returnType, key, object, expireTime, timeUnit);
         } else if (RedisOptType.PUT.equals(redisMethod)) {
-            object = joinPoint.proceed();
-            this.saveRedisCache(returnType, key, object, expireTime, timeUnit);
+            value = joinPoint.proceed();
+            if (expireTime > 0)
+                redisTemplate.opsForValue().set(key, value, expireTime, timeUnit);
+            else
+                redisTemplate.opsForValue().set(key, value);
         } else if (RedisOptType.DELETE.equals(redisMethod)) {
             redisTemplate.delete(key);
         }
-        return object;
+        return value;
     }
 
     public void saveRedisCache(Class returnType, String key, Object value, long expireTime, TimeUnit timeUnit) {
